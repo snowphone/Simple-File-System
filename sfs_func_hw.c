@@ -51,6 +51,7 @@ static struct sfs_dir sd_cwd = { SFS_NOINO }; // current working directory
 enum ERROR{
 	CD_NOT_DIR = -2,
 	CD_NOT_EXISTS = -1,
+	LS_NOT_EXISTS = -1,
 };
 
 void error_message(const char *message, const char *path, int error_code) {
@@ -178,12 +179,9 @@ _Bool isSameString(const char* lhs, const char* rhs){
 	return strcmp(lhs, rhs) == 0;
 }
 
-void* findStrInDirEntries(struct sfs_dir* entry, u_int32_t length, const char* str){
+void* findStrInDirEntries(struct sfs_dir* entry, const char* str){
 	struct sfs_dir* ptr;
-	for(ptr = entry; ptr != entry + length; ++ptr) {
-#ifdef debug
-		printf("%s: %s\n", __func__, ptr->sfd_name);
-#endif
+	for(ptr = entry; ptr != entry + SFS_DENTRYPERBLOCK; ++ptr) {
 		if(isSameString(ptr->sfd_name, str))
 			return ptr;
 	}
@@ -194,8 +192,7 @@ u_int32_t getBlocksToInvestigate(const u_int32_t bytes){
 	return bytes / SFS_BLOCKSIZE + 1;
 }
 
-void sfs_cd(const char* path)
-{
+void* findInCwd(const char* path){
 	struct sfs_inode inode;
 	disk_read(&inode, sd_cwd.sfd_ino);
 
@@ -206,43 +203,81 @@ void sfs_cd(const char* path)
 		assert(sizeof(entries) >= SFS_BLOCKSIZE);
 		disk_read(entries, inode.sfi_direct[i]);
 
-		struct sfs_dir* target = findStrInDirEntries(entries, SFS_DENTRYPERBLOCK, path);
+		struct sfs_dir* target = findStrInDirEntries(entries, path);
 		if(target)
-		{
-			if(isDirectory(target->sfd_ino))
-			{
-				sd_cwd = *target;
-				return;
-			}
-			else{
-				/* not a directory */
-				error_message(__func__, path, CD_NOT_DIR);
-			}
-		} 
+			return target;
 	}
-	/* not exist -> raise error */
-	error_message(__func__, path, CD_NOT_EXISTS);
+	return NULL;
 }
 
+void sfs_cd(const char* path)
+{
+	struct sfs_inode inode;
+	disk_read(&inode, sd_cwd.sfd_ino);
 
+	struct sfs_dir* target = findInCwd(path);
 
-_Bool doesExistInCwd(const char* path) {
+	if(target){
+		if(isDirectory(target->sfd_ino))
+		{
+			sd_cwd = *target;
+			return;
+		}
+		else{
+			/* not a directory */
+			error_message(__func__, path, CD_NOT_DIR);
+		}
+	} else {
+		/* not exist -> raise error */
+		error_message(__func__, path, CD_NOT_EXISTS);
+	}
 }
 
 void sfs_ls(const char* path)
 {
-	if(isSameString(path, "."))
-	{
-	}
-	else{
-		struct sfs_dir backup = sd_cwd;
-		sfs_cd(path);
-		sd_cwd = backup;
-	}
+	if(!path)
+		path = ".";
 
-	/* list all items */
-	char filenameList[MAX_NUM_OF_DIR][SFS_NAMELEN+1] = {0, };
-	u_int32_t end = 0;
+	struct sfs_dir* entry = findInCwd(path);
+
+	if(!entry)
+		error_message(__func__, path, LS_NOT_EXISTS);
+
+	if(isDirectory(entry->sfd_ino))
+	{
+		/* list every files in 'directory' */
+		struct sfs_inode inode;
+		disk_read(&inode, entry->sfd_ino);
+
+		u_int32_t i, 
+				  totalFiles = inode.sfi_size / sizeof(struct sfs_dir),
+				  cnt = 0;
+		for(i = 0; i < getBlocksToInvestigate(inode.sfi_size); ++i)
+		{
+			struct sfs_dir entries[SFS_DENTRYPERBLOCK];
+			disk_read(entries, inode.sfi_direct[i]);
+
+			u_int32_t j;
+			for(j = 0; j < SFS_DENTRYPERBLOCK; ++j)
+			{
+				++cnt;
+				_Bool isDir = isDirectory(entries[j].sfd_ino);
+				/* display each file */
+				printf("%s%s\t", entries[j].sfd_name, isDir? "/" : "");
+
+				if(cnt == totalFiles)
+					goto end_function;
+			}
+
+		}
+	} else {
+		/* list specific file */
+		printf("%s", path);
+		goto end_function;
+	}
+end_function:
+	puts("");	//newline
+	return;
 }
 
 void sfs_mkdir(const char* org_path) 
