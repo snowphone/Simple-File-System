@@ -1,7 +1,7 @@
 //
 // Simple FIle System
-// Student Name :
-// Student Number :
+// Student Name : 문준오
+// Student Number : B611062
 //
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +31,27 @@ void dump_directory();
 
 static struct sfs_super spb;	// superblock
 static struct sfs_dir sd_cwd = { SFS_NOINO }; // current working directory
+
+/* my macro */
+
+#define debug
+
+#define MAX_NUM_OF_DIR (SFS_DENTRYPERBLOCK * SFS_NDIRECT)
+#ifdef debug
+ #define Log printf("%s, %d\n", __func__, __LINE__)
+ #define check(comment, option) do{\
+		assert(comment && (option));\
+		fprintf(stderr, "%dline \'%s\': Success\n", __LINE__, comment);\
+		}while(0);
+#else
+ #define Log 
+ #define check(x,y)
+#endif
+
+enum ERROR{
+	CD_NOT_DIR = -2,
+	CD_NOT_EXISTS = -1,
+};
 
 void error_message(const char *message, const char *path, int error_code) {
 	switch (error_code) {
@@ -147,14 +168,81 @@ void sfs_touch(const char* path)
 	disk_write( &newbie, newbie_ino );
 }
 
+_Bool isDirectory(const u_int32_t inode_num) {
+	struct sfs_inode inode;
+	disk_read(&inode, inode_num);
+	return inode.sfi_type == SFS_TYPE_DIR;
+}
+
+_Bool isSameString(const char* lhs, const char* rhs){
+	return strcmp(lhs, rhs) == 0;
+}
+
+void* findStrInDirEntries(struct sfs_dir* entry, u_int32_t length, const char* str){
+	struct sfs_dir* ptr;
+	for(ptr = entry; ptr != entry + length; ++ptr) {
+#ifdef debug
+		printf("%s: %s\n", __func__, ptr->sfd_name);
+#endif
+		if(isSameString(ptr->sfd_name, str))
+			return ptr;
+	}
+	return NULL;
+}
+
+u_int32_t getBlocksToInvestigate(const u_int32_t bytes){
+	return bytes / SFS_BLOCKSIZE + 1;
+}
+
 void sfs_cd(const char* path)
 {
-	printf("Not Implemented\n");
+	struct sfs_inode inode;
+	disk_read(&inode, sd_cwd.sfd_ino);
+
+	u_int32_t i;
+	for(i = 0; i < getBlocksToInvestigate(inode.sfi_size); ++i)
+	{
+		struct sfs_dir entries[SFS_DENTRYPERBLOCK] = {0, };
+		assert(sizeof(entries) >= SFS_BLOCKSIZE);
+		disk_read(entries, inode.sfi_direct[i]);
+
+		struct sfs_dir* target = findStrInDirEntries(entries, SFS_DENTRYPERBLOCK, path);
+		if(target)
+		{
+			if(isDirectory(target->sfd_ino))
+			{
+				sd_cwd = *target;
+				return;
+			}
+			else{
+				/* not a directory */
+				error_message(__func__, path, CD_NOT_DIR);
+			}
+		} 
+	}
+	/* not exist -> raise error */
+	error_message(__func__, path, CD_NOT_EXISTS);
+}
+
+
+
+_Bool doesExistInCwd(const char* path) {
 }
 
 void sfs_ls(const char* path)
 {
-	printf("Not Implemented\n");
+	if(isSameString(path, "."))
+	{
+	}
+	else{
+		struct sfs_dir backup = sd_cwd;
+		sfs_cd(path);
+		sd_cwd = backup;
+	}
+
+	/* list all items */
+	char filenameList[MAX_NUM_OF_DIR][SFS_NAMELEN+1] = {0, };
+	u_int32_t end = 0;
 }
 
 void sfs_mkdir(const char* org_path) 
