@@ -212,25 +212,34 @@ void* findInCwd(const char* path){
 
 void sfs_cd(const char* path)
 {
+	if(!path) {
+		sd_cwd.sfd_ino = 1;
+		strcpy(sd_cwd.sfd_name, "/");
+		goto exit;
+	}
+
 	struct sfs_inode inode;
 	disk_read(&inode, sd_cwd.sfd_ino);
 
 	struct sfs_dir* target = findInCwd(path);
 
 	if(target){
-		if(isDirectory(target->sfd_ino))
-		{
+		if(isDirectory(target->sfd_ino)) {
 			sd_cwd = *target;
-			return;
+			goto exit;
 		}
-		else{
+		else {
 			/* not a directory */
-			error_message(__func__, path, CD_NOT_DIR);
+			error_message("cd", path, CD_NOT_DIR);
+			goto exit;
 		}
 	} else {
 		/* not exist -> raise error */
-		error_message(__func__, path, CD_NOT_EXISTS);
+		error_message("cd", path, CD_NOT_EXISTS);
+		goto exit;
 	}
+exit:
+	return;
 }
 
 void sfs_ls(const char* path)
@@ -240,8 +249,10 @@ void sfs_ls(const char* path)
 
 	struct sfs_dir* entry = findInCwd(path);
 
-	if(!entry)
-		error_message(__func__, path, LS_NOT_EXISTS);
+	if(!entry) {
+		error_message("ls", path, LS_NOT_EXISTS);
+		goto immediate_exit;
+	}
 
 	if(isDirectory(entry->sfd_ino))
 	{
@@ -266,17 +277,18 @@ void sfs_ls(const char* path)
 				printf("%s%s\t", entries[j].sfd_name, isDir? "/" : "");
 
 				if(cnt == totalFiles)
-					goto end_function;
+					goto exit;
 			}
 
 		}
 	} else {
 		/* list specific file */
 		printf("%s", path);
-		goto end_function;
+		goto exit;
 	}
-end_function:
+exit:
 	puts("");	//newline
+immediate_exit:
 	return;
 }
 
