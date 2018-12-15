@@ -53,10 +53,20 @@ static struct sfs_dir sd_cwd = { SFS_NOINO }; // current working directory
 enum ERROR{
 	CD_NOT_DIR = -2,
 	CD_NOT_EXISTS = -1,
+
 	LS_NOT_EXISTS = -1,
+
 	TOUCH_BLOCK_UNAVAILABLE = -4,
 	TOUCH_DIRECTORY_FULL = -3,
 	TOUCH_ALREADY_EXISTS = -6,
+
+	RMDIR_INVALID_ARG = -8,
+	RMDIR_DIR_NOT_EMPTY = -7,
+	RMDIR_NOT_DIR = -5,
+
+	MKDIR_ALREADY_EXISTS = -6,
+	MKDIR_DIRECTORY_FULL = -3,
+	MKDIR_BLOCK_UNAVAILABLE = -4,
 };
 
 void error_message(const char *message, const char *path, int error_code) {
@@ -203,7 +213,7 @@ uint32_t getNumOfFilesInDirectory(const struct sfs_dir* dirPtr)
 }
 
 _Bool isSameString(const char* lhs, const char* rhs){
-	return strcmp(lhs, rhs) == 0;
+	return strncmp(lhs, rhs, SFS_NAMELEN) == 0;
 }
 
 void* findStrInDirEntries(struct sfs_dir* entry, const char* str){
@@ -268,8 +278,8 @@ void sfs_touch(const char* path)
 	/* A direct block pointer can hold SFS_DENTRYPERBLOCK entries 
 	 * There's SFS_NDIRECT direct pointers
 	 * Therefore, when the number of files n is given then
-	 * access (n / SFS_DENTRYPERBLOCK)th pointer and 
-	 * access (n % SFS_DENTRYPERBLOCK)th entry!
+	 * read inode's (n / SFS_DENTRYPERBLOCK)th direct pointer and 
+	 * access entry array's (n % SFS_DENTRYPERBLOCK)th entry!
 	 */
 
 	//block access
@@ -299,6 +309,7 @@ exit:
 _Bool isDirectory(const uint32_t inode_num) {
 	struct sfs_inode inode;
 	disk_read(&inode, inode_num);
+
 	return inode.sfi_type == SFS_TYPE_DIR;
 }
 
@@ -410,12 +421,126 @@ immediate_exit:
 
 void sfs_mkdir(const char* org_path) 
 {
-	printf("Not Implemented\n");
+	struct sfs_inode dirInode;
+	disk_read(&dirInode, sd_cwd.sfd_ino);
+
+	int i;
+
+	if(findInCwd(org_path)) {
+		error_message("mkdir", org_path, MKDIR_ALREADY_EXISTS);
+		goto exit;
+	} else if(dirInode.sfi_size / sizeof(struct sfs_dir) == MAX_NUM_OF_DIR) {
+		error_message("mkdir", org_path, MKDIR_DIRECTORY_FULL);
+		goto exit;
+	}
+
+	int64_t newBlockNOs[2];
+	newBlockNOs[0] = getUnusedBlock();
+	if(newBlockNOs[0] == -1) {
+		error_message("mkdir", org_path, MKDIR_BLOCK_UNAVAILABLE);
+		goto exit;
+	}
+	newBlockNOs[1] = getUnusedBlock();
+	if(newBlockNOs[1] == -1) {
+		releaseBlock(newBlockNOs[0]);
+		error_message("mkdir", org_path, MKDIR_BLOCK_UNAVAILABLE);
+		goto exit;
+	}
+	/* A direct block pointer can hold SFS_DENTRYPERBLOCK entries 
+	 * There's SFS_NDIRECT direct pointers
+	 * Therefore, when the number of files n is given then
+	 * read inode's (n / SFS_DENTRYPERBLOCK)th direct pointer and 
+	 * access entry array's (n % SFS_DENTRYPERBLOCK)th entry!
+	 */
+
+	struct sfs_dir entries[SFS_DENTRYPERBLOCK];
+	uint32_t numOfFiles = getNumOfFilesInDirectory(&sd_cwd);
+	disk_read(entries, dirInode.sfi_direct[numOfFiles / SFS_DENTRYPERBLOCK]);
+	struct sfs_dir* newbieEntry = &entries[numOfFiles % SFS_DENTRYPERBLOCK];
+
+	/* Succeed to enter the usused entry! */
+
+	newbieEntry->sfd_ino = newBlockNOs[0];
+	strncpy(newbieEntry->sfd_name, org_path, SFS_NAMELEN);
+
+	struct sfs_inode newbieInode;
+	disk_read(&newbieInode, newbieEntry->sfd_ino);
+	newbieInode.sfi_type = SFS_TYPE_DIR;
+	newbieInode.sfi_direct[0] = newBlockNOs[1];
+
+	struct sfs_dir newbieEntries[SFS_DENTRYPERBLOCK];
+	disk_read(newbieEntries, newbieInode.sfi_direct[0]);
+
+	for(i = 0; i < SFS_DENTRYPERBLOCK; ++i) {
+		newbieEntries[i].sfd_ino = SFS_NOINO;
+	}
+
+	newbieEntries[0].sfd_ino = newbieEntry->sfd_ino;
+	strncpy(newbieEntries[0].sfd_name, ".", SFS_NAMELEN);
+
+	newbieEntries[1].sfd_ino = sd_cwd.sfd_ino;
+	strncpy(newbieEntries[1].sfd_name, "..", SFS_NAMELEN);
+	
+	newbieInode.sfi_size = sizeof(struct sfs_dir) * 2;
+	dirInode.sfi_size += sizeof(struct sfs_dir);
+
+	disk_write(newbieEntries, newbieInode.sfi_direct[0]);
+	disk_write(&newbieInode, newbieEntry->sfd_ino);
+	disk_write(entries, dirInode.sfi_direct[numOfFiles / SFS_DENTRYPERBLOCK]);
+	disk_write(&dirInode, sd_cwd.sfd_ino);
+
+
+exit:
+	return;
 }
 
 void sfs_rmdir(const char* org_path) 
 {
-	printf("Not Implemented\n");
+	if(isSameString(org_path, "."))
+	{
+		goto invalid_arg;
+	}
+
+	struct sfs_inode dirInode;
+	disk_read(&dirInode, sd_cwd.sfd_ino);
+
+	int i;
+	struct sfs_dir* target = NULL;
+	struct sfs_dir entries[SFS_DENTRYPERBLOCK];
+
+	for(i = 0; i < getBlocksToInvestigate(dirInode.sfi_size); ++i)
+	{
+		disk_read(entries, dirInode.sfi_direct[i]);
+
+		target = findStrInDirEntries(entries, org_path);
+		if(target)
+			break;
+	}
+
+	if(!target){
+		goto invalid_arg;
+	} else if(!isDirectory(target->sfd_ino)) {
+		error_message("rmdir", org_path, RMDIR_NOT_DIR);
+		goto exit;
+	} else if(getNumOfFilesInDirectory(target)  != 2) {
+		/* 2 means "." and ".." 
+		 * It means the directory is not empty
+		 */
+		error_message("rmdir", org_path, RMDIR_DIR_NOT_EMPTY);
+		goto exit;
+	} else {
+		target->sfd_ino = SFS_NOINO;
+		target->sfd_name[0] = '\0';
+		dirInode.sfi_size -= sizeof(struct sfs_dir);
+
+		disk_write(entries, dirInode.sfi_direct[i]);
+		goto exit;
+	} 
+
+invalid_arg:
+	error_message("rmdir", org_path, RMDIR_INVALID_ARG);
+exit:
+	return;
 }
 
 void sfs_mv(const char* src_name, const char* dst_name) 
