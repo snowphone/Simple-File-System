@@ -137,8 +137,15 @@ void sfs_umount() {
 	}
 }
 
-_Bool findUnusedBlock(uint32_t* blockPtr, uint32_t* bytePtr, uint32_t* bitPtr)
+struct BlockAddr{
+	uint32_t blocksIdx,
+			 bytesIdx,
+			 bitsIdx;
+};
+
+struct BlockAddr findUnusedBlock()
 {
+	struct BlockAddr ret = {SFS_NOINO, };
 	const int end = SFS_MAP_LOCATION + SFS_BITBLOCKS(spb.sp_nblocks);
 	int i,
 		block_num;
@@ -156,51 +163,68 @@ _Bool findUnusedBlock(uint32_t* blockPtr, uint32_t* bytePtr, uint32_t* bitPtr)
 			for(j = 0; j < CHAR_BIT; ++j)
 			{
 				if( BIT_CHECK(buf[i], j) == 0 ) {
-					*blockPtr = block_num;
-					*bytePtr = i;
-					*bitPtr = j;
-					return true;
+					ret.blocksIdx = block_num;
+					ret.bytesIdx = i;
+					ret.bitsIdx = j;
+					return ret;
 				}
 			}
 		}
 	}
-	return false;
+	ret.blocksIdx = SFS_NOINO;
+	return ret;
 }
 
-void setBlock(const int blockIdx, const int bytesIdx, const int bitsIdx)
+void setBlock(const struct BlockAddr entity)
 {
 	u_int8_t buf[SFS_BLOCKSIZE] = { 0, };
-	disk_read(buf, blockIdx);
+	disk_read(buf, entity.blocksIdx);
 	
-	BIT_SET(buf[bytesIdx], bitsIdx);
+	BIT_SET(buf[entity.bytesIdx], entity.bitsIdx);
 
-	disk_write(buf, blockIdx);
+	disk_write(buf, entity.blocksIdx);
+}
+
+struct BlockAddr decomposite(const uint32_t inodeNum){
+	struct BlockAddr ret;
+	ret.blocksIdx = SFS_MAP_LOCATION + inodeNum / SFS_BLOCKBITS;
+	ret.bitsIdx = inodeNum % CHAR_BIT;
+	ret.bytesIdx = (inodeNum - (ret.blocksIdx - SFS_MAP_LOCATION) * SFS_BLOCKBITS) / CHAR_BIT;
+
+	return ret;
+}
+
+uint32_t composite(const struct BlockAddr blockNum){
+	return (blockNum.blocksIdx - SFS_MAP_LOCATION) * SFS_BLOCKBITS 
+		+ blockNum.bytesIdx * CHAR_BIT
+		+ blockNum.bitsIdx;
 }
 
 void releaseBlock(uint32_t inodeNum)
 {
-	uint32_t block_num = SFS_MAP_LOCATION + inodeNum / SFS_BLOCKBITS,
-			  bytesIdx = (inodeNum >> CHAR_BIT) & (SFS_BLOCKSIZE - 1),
-			  bitsIdx = inodeNum % CHAR_BIT;
+	if(inodeNum == SFS_NOINO)
+		return;
+
+	struct BlockAddr blkNum = decomposite(inodeNum);
 
 	u_int8_t buf[SFS_BLOCKSIZE];
-	disk_read(buf, block_num);
+	disk_read(buf, blkNum.blocksIdx );
 	
-	BIT_CLEAR(buf[bytesIdx], bitsIdx);
+	BIT_CLEAR(buf[blkNum.bytesIdx], blkNum.bitsIdx );
 
-	disk_write(buf, block_num);
+	disk_write(buf, blkNum.blocksIdx);
 }
+
+
 
 int64_t getUnusedBlock()
 {
-	uint32_t blockIdx, bytesIdx, bitsIdx;
-	if(!findUnusedBlock(&blockIdx, &bytesIdx, &bitsIdx))
+	struct BlockAddr blockNum = findUnusedBlock();
+	if(blockNum.blocksIdx == SFS_NOINO)
 		return -1;
-	setBlock(blockIdx, bytesIdx, bitsIdx);
+	setBlock(blockNum);
 
-	return (blockIdx - SFS_MAP_LOCATION) * SFS_BLOCKBITS 
-		+ bytesIdx * CHAR_BIT 
-		+ bitsIdx;
+	return composite(blockNum);
 }
 
 uint32_t getNumOfFilesInDirectory(const struct sfs_dir* dirPtr)
@@ -442,6 +466,7 @@ void sfs_mkdir(const char* org_path)
 	}
 	newBlockNOs[1] = getUnusedBlock();
 	if(newBlockNOs[1] == -1) {
+		puts("HI HELLO 안녕");
 		releaseBlock(newBlockNOs[0]);
 		error_message("mkdir", org_path, MKDIR_BLOCK_UNAVAILABLE);
 		goto exit;
@@ -465,6 +490,7 @@ void sfs_mkdir(const char* org_path)
 
 	struct sfs_inode newbieInode;
 	disk_read(&newbieInode, newbieEntry->sfd_ino);
+	bzero(&newbieInode, SFS_BLOCKSIZE);
 	newbieInode.sfi_type = SFS_TYPE_DIR;
 	newbieInode.sfi_direct[0] = newBlockNOs[1];
 
@@ -496,25 +522,30 @@ exit:
 
 void sfs_rmdir(const char* org_path) 
 {
-	if(isSameString(org_path, "."))
-	{
+	if(isSameString(org_path, ".")) {
 		goto invalid_arg;
 	}
 
 	struct sfs_inode dirInode;
 	disk_read(&dirInode, sd_cwd.sfd_ino);
 
-	int i;
-	struct sfs_dir* target = NULL;
-	struct sfs_dir entries[SFS_DENTRYPERBLOCK];
+	int i, numOfBlocks = getBlocksToInvestigate(dirInode.sfi_size);
+	struct sfs_dir entries[SFS_NDIRECT][SFS_DENTRYPERBLOCK] = {0, };
+	struct sfs_dir* target = NULL, 
+		*it,
+		*it_begin = *entries,
+		*it_end = it_begin + MAX_NUM_OF_DIR;
 
-	for(i = 0; i < getBlocksToInvestigate(dirInode.sfi_size); ++i)
+	for(i = 0; i < numOfBlocks; ++i) {
+		disk_read(entries[i], dirInode.sfi_direct[i]);
+	}
+
+	for(it = it_begin; it != it_begin + MAX_NUM_OF_DIR; ++it)
 	{
-		disk_read(entries, dirInode.sfi_direct[i]);
-
-		target = findStrInDirEntries(entries, org_path);
-		if(target)
+		if(isSameString(org_path, it->sfd_name)) {
+			target = it;
 			break;
+		}
 	}
 
 	if(!target){
@@ -529,11 +560,35 @@ void sfs_rmdir(const char* org_path)
 		error_message("rmdir", org_path, RMDIR_DIR_NOT_EMPTY);
 		goto exit;
 	} else {
-		target->sfd_ino = SFS_NOINO;
-		target->sfd_name[0] = '\0';
+
+		/* 현재의 코드는 블럭의 내용을 순서대로 채워 쓴다고 가정함.
+		 * 따라서 파일 또는 디렉토리 삭제시, 뒤에 위치한 블럭들을 전부 당겨주어야 함
+		 * TODO: 현재 출력은 잘 되나, 비트맵에서 문제가 발생하고 있음.
+		 */
+#if 1
+		releaseBlock(target->sfd_ino);
+		memmove(target, target + 1, (it_end - (target + 1) ) * sizeof(struct sfs_dir) );
+#else
+		for(it = target; it != &entries[numOfBlocks]; ++it)
+		{
+			*it = it[1];
+		}
+#endif
+
+#if 0
+		for(it = it_end - (target + 1); it != it_end; ++it)
+		{
+			it->sfd_ino = SFS_NOINO;
+		}
+#endif
+
+		for(i = 0; i < numOfBlocks; ++i) {
+			disk_write(entries[i], dirInode.sfi_direct[i]);
+		}
+
 		dirInode.sfi_size -= sizeof(struct sfs_dir);
 
-		disk_write(entries, dirInode.sfi_direct[i]);
+		disk_write(&dirInode, sd_cwd.sfd_ino);
 		goto exit;
 	} 
 
