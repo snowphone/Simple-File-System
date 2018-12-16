@@ -56,7 +56,7 @@ diff <(echo "$expected") <(echo "$actual")
 
 if [ $? -eq '0' ]
 then
-	echo "mkdir test: Success"
+	echo "rmdir test: Success"
 else
 	echo "----------expected-----------"
 	echo "$expected"

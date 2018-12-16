@@ -565,28 +565,17 @@ void sfs_rmdir(const char* org_path)
 		 * 따라서 파일 또는 디렉토리 삭제시, 뒤에 위치한 블럭들을 전부 당겨주어야 함
 		 * TODO: 현재 출력은 잘 되나, 비트맵에서 문제가 발생하고 있음.
 		 */
-#if 1
+		struct sfs_inode targetInode;
+		disk_read(&targetInode, target->sfd_ino);
+		releaseBlock(targetInode.sfi_direct[0]);
+		
 		releaseBlock(target->sfd_ino);
 		memmove(target, target + 1, (it_end - (target + 1) ) * sizeof(struct sfs_dir) );
-#else
-		for(it = target; it != &entries[numOfBlocks]; ++it)
-		{
-			*it = it[1];
-		}
-#endif
-
-#if 0
-		for(it = it_end - (target + 1); it != it_end; ++it)
-		{
-			it->sfd_ino = SFS_NOINO;
-		}
-#endif
+		dirInode.sfi_size -= sizeof(struct sfs_dir);
 
 		for(i = 0; i < numOfBlocks; ++i) {
 			disk_write(entries[i], dirInode.sfi_direct[i]);
 		}
-
-		dirInode.sfi_size -= sizeof(struct sfs_dir);
 
 		disk_write(&dirInode, sd_cwd.sfd_ino);
 		goto exit;
