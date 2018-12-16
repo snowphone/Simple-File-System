@@ -63,3 +63,24 @@ else
 	echo "-----------actual------------"
 	echo "$actual"
 fi
+
+###############mv
+git checkout DISK1.img
+expected=$(./sfs < test_mv)
+
+git checkout DISK1.img
+actual=$(./mysfs < test_mv)
+
+git checkout DISK1.img
+
+diff <(echo "$expected") <(echo "$actual") 
+
+if [ $? -eq '0' ]
+then
+	echo "mv test: Success"
+else
+	echo "----------expected-----------"
+	echo "$expected"
+	echo "-----------actual------------"
+	echo "$actual"
+fi

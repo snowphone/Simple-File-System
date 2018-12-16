@@ -67,6 +67,9 @@ enum ERROR{
 	MKDIR_ALREADY_EXISTS = -6,
 	MKDIR_DIRECTORY_FULL = -3,
 	MKDIR_BLOCK_UNAVAILABLE = -4,
+
+	MV_NOT_EXISTS = -1,
+	MV_ALREADY_EXISTS = -6,
 };
 
 void error_message(const char *message, const char *path, int error_code) {
@@ -589,7 +592,36 @@ exit:
 
 void sfs_mv(const char* src_name, const char* dst_name) 
 {
-	printf("Not Implemented\n");
+	struct sfs_inode dirInode;
+	disk_read(&dirInode, sd_cwd.sfd_ino);
+	int dirIdx;
+	struct sfs_dir* target = NULL;
+	struct sfs_dir entries[SFS_DENTRYPERBLOCK];
+
+	for(dirIdx = 0; dirIdx < getBlocksToInvestigate(dirInode.sfi_size); ++dirIdx)
+	{
+		disk_read(entries, dirInode.sfi_direct[dirIdx]);
+		target = findStrInDirEntries(entries, src_name);
+		if(target)
+			break;
+	}
+	
+	if(!target) {
+		error_message("mv", src_name, MV_NOT_EXISTS);
+		goto exit;
+	}
+	if(findInCwd(dst_name)) {
+		error_message("mv", dst_name, MV_ALREADY_EXISTS);
+		goto exit;
+	}
+
+	/* Enter exception-free zone! */
+
+	strncpy(target->sfd_name, dst_name, SFS_NAMELEN);
+	disk_write(entries, dirInode.sfi_direct[dirIdx]);
+
+exit:
+	return;
 }
 
 void sfs_rm(const char* path) 
