@@ -84,3 +84,23 @@ else
 	echo "-----------actual------------"
 	echo "$actual"
 fi
+###############rm
+git checkout DISK1.img
+expected=$(./sfs < test_rm)
+
+git checkout DISK1.img
+actual=$(./mysfs < test_rm)
+
+git checkout DISK1.img
+
+diff <(echo "$expected") <(echo "$actual") 
+
+if [ $? -eq '0' ]
+then
+	echo "rm test: Success"
+else
+	echo "----------expected-----------"
+	echo "$expected"
+	echo "-----------actual------------"
+	echo "$actual"
+fi

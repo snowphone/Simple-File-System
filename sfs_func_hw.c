@@ -70,6 +70,9 @@ enum ERROR{
 
 	MV_NOT_EXISTS = -1,
 	MV_ALREADY_EXISTS = -6,
+
+	RM_NOT_EXISTS = -1,
+	RM_IS_DIR = -9,
 };
 
 void error_message(const char *message, const char *path, int error_code) {
@@ -243,9 +246,9 @@ _Bool isSameString(const char* lhs, const char* rhs){
 	return strncmp(lhs, rhs, SFS_NAMELEN) == 0;
 }
 
-void* findStrInDirEntries(struct sfs_dir* entry, const char* str){
+void* findStrInDirEntries(struct sfs_dir* entry, const uint32_t length, const char* str){
 	struct sfs_dir* ptr;
-	for(ptr = entry; ptr != entry + SFS_DENTRYPERBLOCK; ++ptr) {
+	for(ptr = entry; ptr != entry + length; ++ptr) {
 		if(isSameString(ptr->sfd_name, str))
 			return ptr;
 	}
@@ -284,7 +287,7 @@ void sfs_touch(const char* path)
 		struct sfs_dir entry_buf[SFS_DENTRYPERBLOCK];
 		disk_read(entry_buf, inode.sfi_direct[i]);
 
-		if(findStrInDirEntries(entry_buf, path)) {
+		if(findStrInDirEntries(entry_buf, SFS_DENTRYPERBLOCK, path)) {
 			error_message("touch", path, TOUCH_ALREADY_EXISTS);
 			goto exit;
 		}
@@ -358,7 +361,7 @@ void* findInCwd(const char* path)
 		assert(sizeof(entries) >= SFS_BLOCKSIZE);
 		disk_read(entries, inode.sfi_direct[i]);
 
-		struct sfs_dir* target = findStrInDirEntries(entries, path);
+		struct sfs_dir* target = findStrInDirEntries(entries, SFS_DENTRYPERBLOCK, path);
 		if(target)
 			return target;
 	}
@@ -543,13 +546,7 @@ void sfs_rmdir(const char* org_path)
 		disk_read(entries[i], dirInode.sfi_direct[i]);
 	}
 
-	for(it = it_begin; it != it_begin + MAX_NUM_OF_DIR; ++it)
-	{
-		if(isSameString(org_path, it->sfd_name)) {
-			target = it;
-			break;
-		}
-	}
+	target = findStrInDirEntries(it_begin, MAX_NUM_OF_DIR, org_path);
 
 	if(!target){
 		goto invalid_arg;
@@ -566,7 +563,6 @@ void sfs_rmdir(const char* org_path)
 
 		/* 현재의 코드는 블럭의 내용을 순서대로 채워 쓴다고 가정함.
 		 * 따라서 파일 또는 디렉토리 삭제시, 뒤에 위치한 블럭들을 전부 당겨주어야 함
-		 * TODO: 현재 출력은 잘 되나, 비트맵에서 문제가 발생하고 있음.
 		 */
 		struct sfs_inode targetInode;
 		disk_read(&targetInode, target->sfd_ino);
@@ -601,7 +597,7 @@ void sfs_mv(const char* src_name, const char* dst_name)
 	for(dirIdx = 0; dirIdx < getBlocksToInvestigate(dirInode.sfi_size); ++dirIdx)
 	{
 		disk_read(entries, dirInode.sfi_direct[dirIdx]);
-		target = findStrInDirEntries(entries, src_name);
+		target = findStrInDirEntries(entries, SFS_DENTRYPERBLOCK, src_name);
 		if(target)
 			break;
 	}
@@ -626,7 +622,73 @@ exit:
 
 void sfs_rm(const char* path) 
 {
-	printf("Not Implemented\n");
+	struct sfs_inode dirInode;
+	disk_read(&dirInode, sd_cwd.sfd_ino);
+
+	struct sfs_dir entries[SFS_NDIRECT][SFS_DENTRYPERBLOCK] = {0, },
+				   *it,
+				   *it_begin = *entries,
+				   *it_end = it_begin + MAX_NUM_OF_DIR,
+				   *target = NULL;
+	int i,
+		numOfBlocks = getBlocksToInvestigate(dirInode.sfi_size);
+
+	for(i = 0; i < numOfBlocks; ++i) {
+		disk_read(entries[i], dirInode.sfi_direct[i]);
+	}
+
+	target = findStrInDirEntries(it_begin, numOfBlocks * SFS_DENTRYPERBLOCK, path);
+
+	//Exception handling
+	if(!target){
+		error_message("rm", path, RM_NOT_EXISTS);
+		goto exit;
+	} else if(isDirectory(target->sfd_ino)) {
+		error_message("rm", path, RM_IS_DIR);
+		goto exit;
+	}
+
+	/* Enter exception-free zone! */
+	struct sfs_inode targetInode;
+	disk_read(&targetInode, target->sfd_ino);
+
+	//Release blocks
+	int64_t unReleasedBytes = targetInode.sfi_size;
+	//Release direct raw-data blocks
+	for(i = 0; i != SFS_NDIRECT; ++i) {
+		releaseBlock(targetInode.sfi_direct[i]);
+		unReleasedBytes -= SFS_BLOCKSIZE;
+		if(unReleasedBytes <= 0)
+			goto restruction;
+	}
+
+	//This file uses an indirect pointer
+	uint32_t indirectEntries[SFS_DBPERIDB];
+	disk_read(indirectEntries, dirInode.sfi_indirect);
+
+	for(i = 0; i != SFS_DBPERIDB; ++i){
+		//Release second level raw-data blocks
+		releaseBlock(indirectEntries[i]);
+		unReleasedBytes -= SFS_BLOCKSIZE;
+		if(unReleasedBytes <= 0)
+			break;
+	}
+	//Release indirect pointer-array block
+	releaseBlock(dirInode.sfi_indirect);
+
+	//Restruct entries
+restruction:
+	//Release target inode block
+	releaseBlock(target->sfd_ino);
+	//Array compaction
+	memmove(target, target + 1, ( it_end - (target + 1) ) * sizeof(struct sfs_dir) );
+	for(i = 0; i < numOfBlocks; ++i) {
+		disk_write(entries[i], dirInode.sfi_direct[i]);
+	}
+	dirInode.sfi_size -= sizeof(struct sfs_dir);
+	disk_write(&dirInode, sd_cwd.sfd_ino);
+exit:
+	return;
 }
 
 void sfs_cpin(const char* local_path, const char* path) 
