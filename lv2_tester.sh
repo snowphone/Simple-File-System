@@ -104,3 +104,23 @@ else
 	echo "-----------actual------------"
 	echo "$actual"
 fi
+###############stress_dir
+git checkout DISK1.img
+expected=$(./sfs < test_stress_dir)
+
+git checkout DISK1.img
+actual=$(./mysfs < test_stress_dir)
+
+git checkout DISK1.img
+
+diff <(echo "$expected") <(echo "$actual") 
+
+if [ $? -eq '0' ]
+then
+	echo "stress_dir test: Success"
+else
+	echo "----------expected-----------"
+	echo "$expected"
+	echo "-----------actual------------"
+	echo "$actual"
+fi
