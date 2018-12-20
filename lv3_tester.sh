@@ -3,13 +3,13 @@
 make
 
 ###############cpin
-git checkout DISK1.img
+git checkout DISK*.img
 expected=$(./sfs < test_cpin)
 
-git checkout DISK1.img
+git checkout DISK*.img
 actual=$(./mysfs < test_cpin)
 
-git checkout DISK1.img
+git checkout DISK*.img
 
 diff <(echo "$expected") <(echo "$actual") 
 
@@ -24,13 +24,13 @@ else
 fi
 
 ###############cpin_full
-git checkout DISK1.img
+git checkout DISK*.img
 expected=$(./sfs < test_cpin_full)
 
-git checkout DISK1.img
+git checkout DISK*.img
 actual=$(./mysfs < test_cpin_full)
 
-git checkout DISK1.img
+git checkout DISK*.img
 
 diff <(echo "$expected") <(echo "$actual") 
 
@@ -44,13 +44,13 @@ else
 	echo "$actual"
 fi
 ###############cpout
-git checkout DISK1.img
+git checkout DISK*.img
 expected=$(./sfs < test_cpout)
 
-git checkout DISK1.img
+git checkout DISK*.img
 actual=$(./mysfs < test_cpout)
 
-git checkout DISK1.img
+git checkout DISK*.img
 
 diff <(echo "$expected") <(echo "$actual") 
 
@@ -65,13 +65,13 @@ else
 fi
 
 ###############full_cmds
-git checkout DISK1.img
+git checkout DISK*.img
 expected=$(./sfs < test_full_cmds)
 
-git checkout DISK1.img
+git checkout DISK*.img
 actual=$(./mysfs < test_full_cmds)
 
-git checkout DISK1.img
+git checkout DISK*.img
 
 diff <(echo "$expected") <(echo "$actual") 
 

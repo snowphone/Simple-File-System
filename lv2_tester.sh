@@ -3,13 +3,13 @@
 make
 
 ###############touch
-git checkout DISK1.img
+git checkout DISK*.img
 expected=$(./sfs < test_touch)
 
-git checkout DISK1.img
+git checkout DISK*.img
 actual=$(./mysfs < test_touch)
 
-git checkout DISK1.img
+git checkout DISK*.img
 
 diff <(echo "$expected") <(echo "$actual") 
 
@@ -24,13 +24,13 @@ else
 fi
 
 ###############mkdir
-git checkout DISK1.img
+git checkout DISK*.img
 expected=$(./sfs < test_mkdir)
 
-git checkout DISK1.img
+git checkout DISK*.img
 actual=$(./mysfs < test_mkdir)
 
-git checkout DISK1.img
+git checkout DISK*.img
 
 diff <(echo "$expected") <(echo "$actual") 
 
@@ -44,13 +44,13 @@ else
 	echo "$actual"
 fi
 ###############rmdir
-git checkout DISK1.img
+git checkout DISK*.img
 expected=$(./sfs < test_rmdir)
 
-git checkout DISK1.img
+git checkout DISK*.img
 actual=$(./mysfs < test_rmdir)
 
-git checkout DISK1.img
+git checkout DISK*.img
 
 diff <(echo "$expected") <(echo "$actual") 
 
@@ -65,13 +65,13 @@ else
 fi
 
 ###############mv
-git checkout DISK1.img
+git checkout DISK*.img
 expected=$(./sfs < test_mv)
 
-git checkout DISK1.img
+git checkout DISK*.img
 actual=$(./mysfs < test_mv)
 
-git checkout DISK1.img
+git checkout DISK*.img
 
 diff <(echo "$expected") <(echo "$actual") 
 
@@ -85,13 +85,13 @@ else
 	echo "$actual"
 fi
 ###############rm
-git checkout DISK1.img
+git checkout DISK*.img
 expected=$(./sfs < test_rm)
 
-git checkout DISK1.img
+git checkout DISK*.img
 actual=$(./mysfs < test_rm)
 
-git checkout DISK1.img
+git checkout DISK*.img
 
 diff <(echo "$expected") <(echo "$actual") 
 
@@ -105,13 +105,13 @@ else
 	echo "$actual"
 fi
 ###############stress_dir
-git checkout DISK1.img
+git checkout DISK*.img
 expected=$(./sfs < test_stress_dir)
 
-git checkout DISK1.img
+git checkout DISK*.img
 actual=$(./mysfs < test_stress_dir)
 
-git checkout DISK1.img
+git checkout DISK*.img
 
 diff <(echo "$expected") <(echo "$actual") 
 
