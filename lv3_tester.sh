@@ -46,9 +46,11 @@ fi
 ###############cpout
 git checkout DISK*.img
 expected=$(./sfs < test_cpout)
+rm -f ok12sfs
 
 git checkout DISK*.img
 actual=$(./mysfs < test_cpout)
+rm -f ok12sfs
 
 git checkout DISK*.img
 
