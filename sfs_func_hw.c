@@ -3,8 +3,6 @@
 // Student Name : 문준오
 // Student Number : B611062
 //
-/* TODO: touch 시 블록 할당 순서가 다른듯..?
- */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -205,7 +203,6 @@ struct BlockAddr findUnusedBlock()
 
 void setBlock(const struct BlockAddr entity)
 {
-	assert(entity.blockIdx);
 	uint8_t buf[SFS_BLOCKSIZE];
 	disk_read(buf, entity.blockIdx);
 	
@@ -225,7 +222,6 @@ struct BlockAddr decomposite(const uint32_t inodeNum){
 }
 
 uint32_t composite(const struct BlockAddr blockNum) {
-	assert(blockNum.blockIdx);
 	// SFS_BLOCKBITS: a number of bits per block
 	uint32_t ret = (blockNum.blockIdx - SFS_MAP_LOCATION) * SFS_BLOCKBITS 
 		+ blockNum.byteIdx * CHAR_BIT
@@ -237,18 +233,14 @@ void releaseBlock(const uint32_t inodeNum)
 {
 	if(inodeNum == SFS_NOINO)
 		return;
-	assert(inodeNum >= SFS_MAP_LOCATION + SFS_BITBLOCKS(spb.sp_nblocks));
-	assert(inodeNum != 0);
 
 	struct BlockAddr blkNum = decomposite(inodeNum);
-	assert(!(blkNum.blockIdx == 2 && blkNum.byteIdx == 0 && blkNum.bitIdx == 0));
 
 	uint8_t buf[SFS_BLOCKSIZE];
 	disk_read(buf, blkNum.blockIdx );
 	
 	BIT_CLEAR(buf[blkNum.byteIdx], blkNum.bitIdx );
 
-	assert(blkNum.blockIdx != SFS_SB_LOCATION);
 	disk_write(buf, blkNum.blockIdx);
 }
 
@@ -348,7 +340,6 @@ void sfs_touch(const char* path)
 
 
 	//block access
-	assert(dirInode.sfi_direct[directIdx] );
 	disk_read( entries, dirInode.sfi_direct[directIdx] );
 
 	//find an empty direct pointer
@@ -363,11 +354,9 @@ void sfs_touch(const char* path)
 
 	/* --------- No more exceptions! ----------- */
 
-	assert(dirInode.sfi_direct[directIdx] != SFS_SB_LOCATION);
 	disk_write( entries, dirInode.sfi_direct[directIdx] );
 
 	dirInode.sfi_size += sizeof(struct sfs_dir);
-	assert(sd_cwd.sfd_ino != SFS_SB_LOCATION);
 	disk_write( &dirInode, sd_cwd.sfd_ino );
 
 	struct sfs_inode newbieInode;
@@ -376,7 +365,6 @@ void sfs_touch(const char* path)
 	newbieInode.sfi_size = 0;
 	newbieInode.sfi_type = SFS_TYPE_FILE;
 
-	assert(newbie->sfd_ino != SFS_SB_LOCATION);
 	disk_write( &newbieInode, newbie->sfd_ino);
 exit:
 	return;
@@ -404,7 +392,6 @@ void* findInCwd(const char* path)
 	for(i = 0; i < getBlocksToInvestigate(inode.sfi_size); ++i)
 	{
 		struct sfs_dir entries[SFS_DENTRYPERBLOCK] = {0, };
-		assert(sizeof(entries) >= SFS_BLOCKSIZE);
 		disk_read(entries, inode.sfi_direct[i]);
 
 		struct sfs_dir* target = findStrInDirEntries(entries, SFS_DENTRYPERBLOCK, path);
@@ -531,7 +518,6 @@ void sfs_mkdir(const char* org_path)
 	}
 
 	disk_read(entries, dirInode.sfi_direct[directIdx]);
-	assert(dirInode.sfi_direct[directIdx] != SFS_SB_LOCATION);
 	struct sfs_dir* newbieEntry = &entries[entryIdx];
 
 	/* Succeed to enter the usused entry! */
@@ -572,15 +558,11 @@ void sfs_mkdir(const char* org_path)
 	newbieInode.sfi_size = sizeof(struct sfs_dir) * 2;
 	dirInode.sfi_size += sizeof(struct sfs_dir);
 
-	assert(newbieInode.sfi_direct[0] != SFS_SB_LOCATION);
 	disk_write(newbieEntries, newbieInode.sfi_direct[0]);
 
-	assert(newbieEntry->sfd_ino != SFS_SB_LOCATION);
 	disk_write(&newbieInode, newbieEntry->sfd_ino);
 
-	assert(dirInode.sfi_direct[directIdx] != SFS_SB_LOCATION);
 	disk_write(entries, dirInode.sfi_direct[directIdx]);
-	assert(sd_cwd.sfd_ino != SFS_SB_LOCATION);
 	disk_write(&dirInode, sd_cwd.sfd_ino);
 
 
@@ -595,7 +577,6 @@ void sfs_rmdir(const char* org_path)
 	}
 
 	struct sfs_inode dirInode;
-	assert(sd_cwd.sfd_ino != SFS_SB_LOCATION);
 	disk_read(&dirInode, sd_cwd.sfd_ino);
 
 	int i, numOfBlocks = getBlocksToInvestigate(dirInode.sfi_size);
@@ -730,7 +711,6 @@ void sfs_rm(const char* path)
 			releaseBlock(ptrEntries[i]);
 		}
 		numOfBlocksToRelease -= i;
-		assert(numOfBlocksToRelease == SFS_NDIRECT);
 	}
 
 	uint32_t* directBlkPtr = targetInode.sfi_direct;
@@ -805,7 +785,6 @@ void sfs_cpin(const char* local_path, const char* path)
 	const struct sfs_dir newbie = *(struct sfs_dir*)findInCwd(local_path);
 
 	struct sfs_inode newbieInode;
-	assert(newbie.sfd_ino != SFS_SB_LOCATION);
 	disk_read(&newbieInode, newbie.sfd_ino);
 
 	int i;
@@ -815,7 +794,6 @@ void sfs_cpin(const char* local_path, const char* path)
 		uint8_t rawData[SFS_BLOCKSIZE] = { 0, };
 
 		int n = fread(rawData, 1, SFS_BLOCKSIZE, fp);
-		assert(n != -1);
 
 		newbieInode.sfi_direct[i] = getUnusedBlock();
 		if(newbieInode.sfi_direct[i] == SFS_NOINO) {
@@ -823,7 +801,6 @@ void sfs_cpin(const char* local_path, const char* path)
 			goto cp_done;
 		}
 
-		assert(newbieInode.sfi_direct[i] != SFS_SB_LOCATION);
 		disk_write(rawData, newbieInode.sfi_direct[i]);
 		newbieInode.sfi_size += n;
 
@@ -842,7 +819,6 @@ void sfs_cpin(const char* local_path, const char* path)
 	}
 
 	uint32_t blockInodeList[SFS_DBPERIDB];
-	assert(newbieInode.sfi_indirect != SFS_SB_LOCATION);
 	disk_read(blockInodeList, newbieInode.sfi_indirect);
 	bzero(&blockInodeList, sizeof blockInodeList);
 
@@ -858,7 +834,6 @@ void sfs_cpin(const char* local_path, const char* path)
 			goto cp_indirect_done;
 		}
 
-		assert(blockInodeList[i] != SFS_SB_LOCATION);
 		disk_write(rawData, blockInodeList[i]);
 		newbieInode.sfi_size += n;
 
@@ -871,7 +846,7 @@ cp_indirect_done:
 	disk_write(blockInodeList, newbieInode.sfi_indirect);
 cp_done:
 
-	disk_write(&newbieInode, newbie.sfd_ino); // 이 줄이 문제!
+	disk_write(&newbieInode, newbie.sfd_ino); 
 	fclose(fp);
 exit:
 #undef uncopiedBytes
@@ -912,7 +887,7 @@ void sfs_cpout(const char* local_path, const char* path)
 
 
 	uint32_t blockInodeList[SFS_DBPERIDB];
-	disk_read(blockInodeList, targetInode.sfi_indirect); //문제!
+	disk_read(blockInodeList, targetInode.sfi_indirect); 
 
 	for(i = 0; i < SFS_DBPERIDB; ++i){
 		uint8_t buf[SFS_BLOCKSIZE];
