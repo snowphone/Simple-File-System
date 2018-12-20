@@ -79,6 +79,9 @@ enum ERROR{
 	CPIN_FILE_SIZE_EXCEED = -12,
 	CPIN_BLOCK_UNAVAILABLE = -4,
 	CPIN_DIRECTORY_FULL = -3,
+
+	CPOUT_ALREADY_EXISTS = -6,
+	CPOUT_NOT_EXISTS = -1,
 };
 
 void error_message(const char *message, const char *path, int error_code) {
@@ -749,11 +752,13 @@ uint32_t getFileSize(const char* path){
 void sfs_cpin(const char* local_path, const char* path) 
 {
 	FILE* fp = fopen(path, "rb");
-	int64_t requiredBytes = getFileSize(path);
+	int64_t fileSize = getFileSize(path);
+#define		uncopiedBytes (fileSize - newbieInode.sfi_size)
 	if(!fp) {
 		error_message("cpin", path, CPIN_REAL_PATH_NOT_EXIST);
 		goto exit;
-	} if(findInCwd(local_path)){
+	} 
+	if(findInCwd(local_path)){
 		error_message("cpin", local_path, CPIN_ALREADY_EXISTS);
 		goto exit;
 	} 
@@ -765,24 +770,27 @@ void sfs_cpin(const char* local_path, const char* path)
 		error_message("cpin", local_path, CPIN_BLOCK_UNAVAILABLE);
 		goto exit;
 	}
+	if(fileSize > MAX_FILE_SIZE) {
+		error_message("cpin", local_path, CPIN_FILE_SIZE_EXCEED);
+		goto exit;
+	}
 
 	sfs_touch(local_path);
 
-
-	struct sfs_dir* newbie = findInCwd(local_path);
+	const struct sfs_dir* const newbie = findInCwd(local_path);
 
 	struct sfs_inode newbieInode;
+	assert(newbie->sfd_ino != SFS_SB_LOCATION);
 	disk_read(&newbieInode, newbie->sfd_ino);
 
 	int i;
 	//Copy raw-data into direct blocks
 	for(i = 0; i < SFS_NDIRECT; ++i){
 
-		uint8_t buf[SFS_BLOCKSIZE] = { 0, };
+		uint8_t rawData[SFS_BLOCKSIZE] = { 0, };
 
-		int n = fread(buf, SFS_BLOCKSIZE, 1, fp);
-		if(!n)
-			goto cp_done;
+		int n = fread(rawData, 1, SFS_BLOCKSIZE, fp);
+		assert(n != -1);
 
 		newbieInode.sfi_direct[i] = getUnusedBlock();
 		if(newbieInode.sfi_direct[i] == SFS_NOINO)
@@ -791,61 +799,110 @@ void sfs_cpin(const char* local_path, const char* path)
 			goto cp_done;
 		}
 
-		disk_write(buf, newbieInode.sfi_direct[i]);
+		assert(newbieInode.sfi_direct[i] != SFS_SB_LOCATION);
+		disk_write(rawData, newbieInode.sfi_direct[i]);
 		newbieInode.sfi_size += n;
-	}
 
-	if(feof(fp))
-		goto cp_done;
+		if (uncopiedBytes == 0)
+			goto cp_done;
+	}
 
 	/* Goto statement isn't executed.
 	 * So, copy remaining raw-data into indirect block
 	 */
+start_indirect:
 	newbieInode.sfi_indirect = getUnusedBlock();
 	if(newbieInode.sfi_indirect == SFS_NOINO) {
 		error_message("cpin", local_path, CPIN_BLOCK_UNAVAILABLE);
 		goto cp_done;
 	}
 
-	uint32_t ptrEntries[SFS_DBPERIDB];
-	disk_read(ptrEntries, newbieInode.sfi_indirect);
+	uint32_t blockInodeList[SFS_DBPERIDB];
+	assert(newbieInode.sfi_indirect != SFS_SB_LOCATION);
+	disk_read(blockInodeList, newbieInode.sfi_indirect);
+	bzero(&blockInodeList, sizeof blockInodeList);
 
-	for(i = 0; i < SFS_DBPERIDB; ++i){
+	for(i = 0; i < SFS_DBPERIDB; ++i) {
 
-		uint8_t buf[SFS_BLOCKSIZE] = { 0, };
-		int n = fread(buf, SFS_BLOCKSIZE, 1, fp);
-		if(!n)
-			goto cp_done;
+		uint8_t rawData[SFS_BLOCKSIZE] = { 0, };
+		int n = fread(rawData, 1, SFS_BLOCKSIZE, fp);
 
-		ptrEntries[i] = getUnusedBlock();
-		if(ptrEntries[i] == SFS_NOINO) {
+		blockInodeList[i] = getUnusedBlock();
+		if(blockInodeList[i] == SFS_NOINO) {
 			error_message("cpin", local_path, CPIN_BLOCK_UNAVAILABLE);
-			goto cp_done;
+			goto cp_indirect_done;
 		}
 
-		disk_write(buf, ptrEntries[i]);
+		assert(blockInodeList[i] != SFS_SB_LOCATION);
+		disk_write(rawData, blockInodeList[i]);
 		newbieInode.sfi_size += n;
 
+		if (uncopiedBytes == 0)
+			goto cp_indirect_done;
 	}
 
-	if(newbieInode.sfi_size < requiredBytes)
-	{
-		error_message("cpin", local_path, CPIN_FILE_SIZE_EXCEED);
-	}
 
+cp_indirect_done:
+	assert(newbieInode.sfi_indirect != SFS_SB_LOCATION);
+	disk_write(blockInodeList, newbieInode.sfi_indirect);
 cp_done:
-	if(newbieInode.sfi_indirect != SFS_NOINO)
-		disk_write(ptrEntries, newbieInode.sfi_indirect);
+	assert(newbie->sfd_ino != SFS_SB_LOCATION);
 	disk_write(&newbieInode, newbie->sfd_ino);
 
 	fclose(fp);
 exit:
+#undef uncopiedBytes
 	return;
+}
+
+_Bool doesFileExist(const char* realPath) {
+	return access(realPath, F_OK) != -1;
 }
 
 void sfs_cpout(const char* local_path, const char* path) 
 {
-	printf("Not Implemented\n");
+	const struct sfs_dir* const target = findInCwd(local_path);
+	if (!target) {
+		error_message("cpout", local_path, CPOUT_NOT_EXISTS);
+		return;
+	}
+	if (doesFileExist(path)) {
+		error_message("cpout", path, CPOUT_ALREADY_EXISTS);
+		return;
+	}
+	FILE* fp = fopen(path, "wb");
+
+	struct sfs_inode targetInode;
+	disk_read(&targetInode, target->sfd_ino);
+
+	uint32_t uncopiedBytes = targetInode.sfi_size;
+
+	int i;
+	for(i = 0; i < SFS_NDIRECT; ++i){
+		uint8_t buf[SFS_BLOCKSIZE];
+		disk_read(buf, targetInode.sfi_direct[i]);
+		uint32_t nwritten = fwrite(buf, 1, SFS_BLOCKSIZE, fp);
+		uncopiedBytes -= nwritten;
+		if(uncopiedBytes == 0)
+			goto exit;
+	}
+
+	uint32_t blockInodeList[SFS_DBPERIDB];
+	disk_read(blockInodeList, targetInode.sfi_indirect);
+
+	for(i = 0; i < SFS_DBPERIDB; ++i){
+		uint8_t buf[SFS_BLOCKSIZE];
+		uint32_t writeBytes = min(SFS_BLOCKSIZE, uncopiedBytes);
+		disk_read(buf, blockInodeList[i]);
+		fwrite(buf, 1, writeBytes, fp);
+		uncopiedBytes -= writeBytes;
+		if(uncopiedBytes == 0)
+			goto exit;
+	}
+
+
+exit:
+	fclose(fp);
 }
 
 void dump_inode(struct sfs_inode inode) {
