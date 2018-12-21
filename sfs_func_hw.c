@@ -37,7 +37,9 @@ static struct sfs_dir sd_cwd = { SFS_NOINO }; // current working directory
 
 /* my macro */
 
-//#define debug
+#define debug
+
+
 #ifdef debug
 #define Log fprintf(stderr, "%s: %d\n", __func__, __LINE__)
 
@@ -859,10 +861,13 @@ _Bool doesFileExist(const char* realPath) {
 
 void sfs_cpout(const char* local_path, const char* path) 
 {
-	const struct sfs_dir* target = findInCwd(local_path);
-	if (!target) {
+	const struct sfs_dir* targetPtr = findInCwd(local_path);
+	struct sfs_dir target;
+	if (!targetPtr) {
 		error_message("cpout", local_path, CPOUT_NOT_EXISTS);
 		return;
+	} else{
+		target = *targetPtr;
 	}
 	if (doesFileExist(path)) {
 		error_message("cpout", path, CPOUT_ALREADY_EXISTS);
@@ -871,7 +876,7 @@ void sfs_cpout(const char* local_path, const char* path)
 	FILE* fp = fopen(path, "wb");
 
 	struct sfs_inode targetInode;
-	disk_read(&targetInode, target->sfd_ino);
+	disk_read(&targetInode, target.sfd_ino);
 
 	int64_t uncopiedBytes = targetInode.sfi_size;
 
@@ -879,8 +884,10 @@ void sfs_cpout(const char* local_path, const char* path)
 	for(i = 0; i < SFS_NDIRECT; ++i){
 		uint8_t buf[SFS_BLOCKSIZE];
 		disk_read(buf, targetInode.sfi_direct[i]);
-		uint32_t nwritten = fwrite(buf, 1, SFS_BLOCKSIZE, fp);
+		uint32_t writeBytes = min(SFS_BLOCKSIZE, uncopiedBytes);
+		uint32_t nwritten = fwrite(buf, 1, writeBytes, fp);
 		uncopiedBytes -= nwritten;
+
 		if(uncopiedBytes <= 0)
 			goto exit;
 	}
@@ -893,8 +900,9 @@ void sfs_cpout(const char* local_path, const char* path)
 		uint8_t buf[SFS_BLOCKSIZE];
 		uint32_t writeBytes = min(SFS_BLOCKSIZE, uncopiedBytes);
 		disk_read(buf, blockInodeList[i]);
-		fwrite(buf, 1, writeBytes, fp);
+		int nwritten = fwrite(buf, 1, writeBytes, fp);
 		uncopiedBytes -= writeBytes;
+
 		if(uncopiedBytes <= 0)
 			goto exit;
 	}
