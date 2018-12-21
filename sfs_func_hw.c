@@ -910,6 +910,7 @@ void sfs_cpout(const char* local_path, const char* path)
 
 exit:
 	fclose(fp);
+	chmod(path, 0700);
 }
 
 void dump_inode(struct sfs_inode inode) {
