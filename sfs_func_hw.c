@@ -37,7 +37,7 @@ static struct sfs_dir sd_cwd = { SFS_NOINO }; // current working directory
 
 /* my macro */
 
-#define debug
+//#define debug
 
 
 #ifdef debug
